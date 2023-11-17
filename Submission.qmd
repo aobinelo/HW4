@@ -1,0 +1,273 @@
+---
+title: "Submission"
+format: html
+editor: visual
+Author: Adaeze Obinelo
+output: quarto::quarto_html_document
+---
+
+## Setup
+
+```{r}
+
+library(tidyverse)
+library(dplyr)
+library(data.table)
+library(parallel)
+library(microbenchmark)
+
+```
+
+## 
+
+Fun1
+
+```{r}
+
+fun1 <- function(mat) {
+  n <- nrow(mat)
+  ans <- double(n) 
+  for (i in 1:n) {
+    ans[i] <- sum(mat[i, ])
+  }
+  ans
+}
+
+fun1alt <- function(mat) {
+  ans <- rowSums(mat)
+  as.double(ans)
+}
+
+```
+
+Fun2
+
+```{r}
+# Cumulative sum by row
+fun2 <- function(mat) {
+  n <- nrow(mat)
+  k <- ncol(mat)
+  ans <- mat
+  for (i in 1:n) {
+    for (j in 2:k) {
+      ans[i,j] <- mat[i, j] + ans[i, j - 1]
+    }
+  }
+  ans
+}
+
+fun2alt <- function(mat) {
+  mat[, 2:ncol(mat)] <- t(apply(mat[, 2:ncol(mat), drop = FALSE], 1, cumsum))
+  mat
+}
+```
+
+## Question 1: Check that alt functions match original
+
+Fun1
+
+```{r}
+# Use the data with this code
+set.seed(2315)
+dat <- matrix(rnorm(200 * 100), nrow = 200)
+```
+
+```{r}
+output_fun1 <- fun1(dat)
+output_fun1alt <- fun1alt(dat)
+
+if (all(output_fun1 == output_fun1alt)) {
+  cat("Outputs are the same.\n")
+} else {
+  cat("Outputs differ.\n")
+}
+
+```
+
+Fun2
+
+```{r}
+output_fun2 <- fun2(dat)
+output_fun1alt <-fun1alt(dat)
+
+if (all(output_fun1 == output_fun1alt)) {
+  cat("Outputs are the same.\n")
+} else {
+  cat("Outputs differ.\n")
+}
+
+```
+
+```{r}
+knitr::include_graphics("spider-man.gif")
+```
+
+fun1 and fun1alt outputs \^
+
+## Check Computation Times
+
+Fun1
+
+```{r}
+# Test for the first
+microbenchmark::microbenchmark(
+  fun1(dat),
+  fun1alt(dat), unit = "relative"
+)
+```
+
+Fun2
+
+```{r}
+# Test for the second
+microbenchmark::microbenchmark(
+  fun2(dat),
+  fun2alt(dat), unit = "relative"
+)
+```
+
+Fun1alt is about 6 times as fast as fun1 and fun2alt is about 3 times as fast as fun2
+
+```{r}
+knitr::include_graphics("fast.gif")
+```
+
+## Parallel Computing
+
+```{r}
+sim_pi <- function(n = 1000, i = NULL) {
+  p <- matrix(runif(n*2), ncol = 2)
+  mean(rowSums(p^2) < 1) * 4
+}
+
+# Here is an example of the run
+set.seed(156)
+sim_pi(1000) # 3.132
+```
+
+```{r}
+# This runs the simulation a 4,000 times, each with 10,000 points
+set.seed(1231)
+system.time({
+  ans <- unlist(lapply(1:4000, sim_pi, n = 10000))
+  print(mean(ans))
+})
+```
+
+## Question 2
+
+```{r}
+library(parallel)
+
+cl <- makeCluster(detectCores())
+clusterExport(cl, "sim_pi")
+set.seed(1231)
+system.time({
+  ans <- unlist(parLapply(cl, 1:4000, sim_pi, n = 10000))
+  print(mean(ans))
+})
+stopCluster(cl)
+
+```
+
+## SQL
+
+```{r}
+library(RSQLite)
+library(DBI)
+library(sqldf)
+
+
+
+# Initialize a temporary in memory database
+con <- dbConnect(SQLite(), ":memory:")
+
+# Download tables
+film <- read.csv("https://raw.githubusercontent.com/ivanceras/sakila/master/csv-sakila-db/film.csv")
+film_category <- read.csv("https://raw.githubusercontent.com/ivanceras/sakila/master/csv-sakila-db/film_category.csv")
+category <- read.csv("https://raw.githubusercontent.com/ivanceras/sakila/master/csv-sakila-db/category.csv")
+
+# Copy data.frames to database
+dbWriteTable(con, "film", film)
+dbWriteTable(con, "film_category", film_category)
+dbWriteTable(con, "category", category)
+```
+
+## Question 3
+
+```{sql, connection=con}
+
+SELECT category_id, COUNT(DISTINCT film_id) AS unique_film_count
+FROM film_category
+GROUP BY category_id
+ORDER BY category_id;
+```
+
+## Question 4- Calculate average rental rate per rating category
+
+Calculate new variable "avg rental rate" within an inner join with "film" and "film_category"
+
+```{sql, connection=con}
+
+SELECT b.category_id, AVG(a.rental_rate) AS avg_rental_rate
+FROM film AS a
+INNER JOIN film_category AS b ON a.film_id = b.film_id
+GROUP BY b.category_id
+ORDER BY b.category_id
+
+```
+
+## Question 5
+
+Used an inner join again, but then tabulate unique film_id
+
+```{sql, connection=con}
+
+SELECT b.category_id, COUNT(DISTINCT a.film_id) AS unique_film_count
+FROM film AS a
+INNER JOIN film_category AS b ON a.film_id = b.film_id
+GROUP BY b.category_id
+ORDER BY b.category_id;
+```
+
+## Question 6 
+
+Same as Q5, but re-ordered by results by descending unique film count
+
+```{sql, connection=con}
+
+SELECT b.category_id, COUNT(DISTINCT a.film_id) AS unique_film_count
+FROM film AS a
+INNER JOIN film_category AS b ON a.film_id = b.film_id
+GROUP BY b.category_id
+ORDER BY unique_film_count DESC, b.category_id
+```
+
+## Question 6- Which category is the most popular?
+
+```{sql, connection=con}
+
+WITH UniqueFilmCounts AS (
+    SELECT b.category_id, COUNT(DISTINCT a.film_id) AS unique_film_count
+    FROM film AS a
+    INNER JOIN film_category AS b ON a.film_id = b.film_id
+    GROUP BY b.category_id
+    ORDER BY unique_film_count DESC, b.category_id
+    LIMIT 1
+)
+
+SELECT uf.category_id, uf.unique_film_count, c.name
+FROM UniqueFilmCounts uf
+JOIN category c ON uf.category_id = c.category_id;
+```
+
+```{r}
+
+dbDisconnect(con)
+```
+
+The most popular film category is "sports"
+
+```{r}
+knitr::include_graphics("sportz.gif")
+```
